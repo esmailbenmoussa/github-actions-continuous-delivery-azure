@@ -1,5 +1,5 @@
 import Game from './game.js'
-
+let esmail
 let p1, p2
 while (!p1) {
   p1 = window.prompt('Who is player 1?')
