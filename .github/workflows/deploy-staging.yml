@@ -55,12 +55,6 @@ jobs:
           image-name: ${{env.DOCKER_IMAGE_NAME}}
 
       
-      - name: 'download artifact'
-      - uses: '@actions/download-artifact'
-
-      - name: 'deploy to container'
-      - uses: '@azure/webapps-container-deploy'  
-      
   Deploy-to-Image:
     runs-on: ubuntu-latest
     needs: Build-Docker-Image
