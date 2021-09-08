@@ -1,12 +1,13 @@
-name: Staging deployment
+name: Configure Azure environment
 
 on: 
   pull_request:
     types: [labeled]
-    
+
 env:
-  DOCKER_IMAGE_NAME: esmailbenmoussa-azure-ttt
-  IMAGE_REGISTRY_URL: docker.pkg.github.com
+  AZURE_RESOURCE_GROUP: cd-with-actions
+  AZURE_APP_PLAN: actions-ttt-deployment
+  AZURE_LOCATION: '"Central US"'
   #################################################
   ### USER PROVIDED VALUES ARE REQUIRED BELOW   ###
   #################################################
@@ -14,73 +15,57 @@ env:
   ### REPLACE USERNAME WITH GH USERNAME         ###
   AZURE_WEBAPP_NAME: esmailbenmoussa-ttt-app
   #################################################
-  
-  
+
 jobs:
-  build:
-    if: contains(github.event.pull_request.labels.*.name, 'stage')
+  setup-up-azure-resources:
     runs-on: ubuntu-latest
-    
-    
+
+    if: contains(github.event.pull_request.labels.*.name, 'spin up environment')
+
     steps:
-      - uses: 'actions/checkout@v1'
-      - name: 'npm install and build webpack'
-        run: |
-            npm install
-            npm run build
-      
-      - uses: 'actions/upload-artifact@main'
-      - with:
-          name: webpack artifact
-          path: public/
-          
-  Build-Docker-Image:
-    runs-on: ubuntu-latest
-    needs: build
-    name: Build image and store in GitHub Packages
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v1
-        
-      - name: Download built artifact
-        uses: actions/download-artifact@main
-        with:
-          name: webpack artifacts
-          path: public
-          
-      - name: create image and store in Packages
-        uses: mattdavis0351/actions/docker-gpr@1.3.0
-        with:
-          repo-token: ${{secrets.GITHUB_TOKEN}}
-          image-name: ${{env.DOCKER_IMAGE_NAME}}
-      
-  Deploy-to-Image:
-    runs-on: ubuntu-latest
-    needs: Build-Docker-Image
-    name: Deploy app container to Azure
-    steps:
-      - name: "Login via Azure CLI"
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Azure login
         uses: azure/login@v1
         with:
-          creds: ${{secrets.AZURE_CREDENTIALS}}
-          
-      - uses: azure/docker-login@v1
-        with:
-          login-server: ${{env.IMAGE_REGISTRY_URL}}
-          username: ${{github.actor}}
-          password: ${{secrets.GITHUB_TOKEN}}
-          
-      - name: Deploy webb app container
-        uses: azure/webapps-deploy@v2
-        with: 
-          app-name: ${{env.AZURE_WEBAPP_NAME}}
-          images: ${{env.IMAGE_REGISTRY_URL}}/${{ github.repository }}/${{env.DOCKER_IMAGE_NAME}}:${{ github.sha }}
-          
-      - name: Azure logout
-        run: |
-          az logout
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-  
-  
-  
-      
+      - name: Create Azure resource group
+        if: success()
+        run: |
+          az group create --location ${{env.AZURE_LOCATION}} --name ${{env.AZURE_RESOURCE_GROUP}} --subscription ${{secrets.AZURE_SUBSCRIPTION_ID}}
+
+      - name: Create Azure app service plan
+        if: success()
+        run: |
+          az appservice plan create --resource-group ${{env.AZURE_RESOURCE_GROUP}} --name ${{env.AZURE_APP_PLAN}} --is-linux --sku F1 --subscription ${{secrets.AZURE_SUBSCRIPTION_ID}}
+
+      - name: Create webapp resource
+        if: success()
+        run: |
+          az webapp create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --plan ${{ env.AZURE_APP_PLAN }} --name ${{ env.AZURE_WEBAPP_NAME }}  --deployment-container-image-name nginx --subscription ${{secrets.AZURE_SUBSCRIPTION_ID}}
+
+      - name: Configure webapp to use GitHub Packages
+        if: success()
+        run: |
+          az webapp config container set --docker-custom-image-name nginx --docker-registry-server-password ${{secrets.GITHUB_TOKEN}} --docker-registry-server-url https://docker.pkg.github.com --docker-registry-server-user ${{github.actor}} --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --subscription ${{secrets.AZURE_SUBSCRIPTION_ID}}
+
+  destroy-azure-resources:
+    runs-on: ubuntu-latest
+
+    if: contains(github.event.pull_request.labels.*.name, 'destroy environment')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Destroy Azure environment
+        if: success()
+        run: |
+          az group delete --name ${{env.AZURE_RESOURCE_GROUP}} --subscription ${{secrets.AZURE_SUBSCRIPTION_ID}} --yes
